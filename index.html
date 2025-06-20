@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Bookmark Editor with Favicon & Reload</title>
+<title>Bookmark Editor with Export</title>
 <style>
   body {
     font-family: Arial, sans-serif;
@@ -88,367 +88,249 @@
   #searchInput {
     width: 400px;
   }
-  @media (max-width: 600px) {
-    #searchInput {
-      width: 100%;
-    }
-    .folder > input[type=text], .bookmark-item input[type=text] {
-      width: 100%;
-    }
+  .input-hint {
+    font-size: 12px;
+    color: #555;
+    margin-left: 8px;
+    font-style: italic;
   }
 </style>
 </head>
 <body>
-
-<h1>Bookmark Editor with Favicon & Reload</h1>
-
+<h1>Bookmark Editor</h1>
 <div id="controls">
   <input type="file" id="fileInput" accept=".html" />
   <input type="text" id="searchInput" placeholder="Search bookmarks or folders..." />
   <button id="addFolderBtn" style="display:none;">Add Folder</button>
   <button id="addBookmarkBtn" style="display:none;">Add Bookmark</button>
-  <button id="exportBtn" style="display:none;">Export as HTML</button>
+  <button id="downloadBtn" style="display:none;">Download Bookmark</button>
 </div>
-
 <div id="bookmarkContainer"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <script>
-  let bookmarkTree = null;
-  let selectedFolderNode = null;
-  let searchQuery = '';
+let bookmarkTree = null;
+let selectedFolderNode = null;
+let searchQuery = '';
+const expandedFolders = new WeakSet();
+let folderInputMap = new WeakMap();
 
-  // ডিফল্ট ক্লোজড ফোল্ডার জন্য WeakSet
-  const expandedFolders = new WeakSet();
-
-  // ফেভিকন এর জন্য ডোমেইন বের করার হেল্পার
-  function getDomain(url) {
-    try {
-      const u = new URL(url);
-      return u.hostname;
-    } catch {
-      return null;
-    }
-  }
-
-  // গুগলের ফেভিকন সার্ভিস দিয়ে ফেভিকন URL নেয়া
-  function getFaviconUrl(url) {
-    const domain = getDomain(url);
-    if(!domain) return '';
-    return `https://www.google.com/s2/favicons?domain=${domain}`;
-  }
-
-  // ফাইল আপলোড ইভেন্ট
-  document.getElementById('fileInput').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = function(event) {
-      const content = event.target.result;
-      parseBookmarkHTML(content);
-      selectedFolderNode = bookmarkTree;
-      renderTree();
-      document.getElementById('addFolderBtn').style.display = 'inline-block';
-      document.getElementById('addBookmarkBtn').style.display = 'inline-block';
-      document.getElementById('exportBtn').style.display = 'inline-block';
-    };
-    reader.readAsText(file);
-  });
-
-  // HTML থেকে বুকমার্ক পার্সার
-  function parseBookmarkHTML(html) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-
-    function parseDL(dlElem) {
-      const children = [];
-      for(let i = 0; i < dlElem.children.length; i++) {
-        const dt = dlElem.children[i];
-        if(dt.tagName !== 'DT') continue;
-
-        const h3 = dt.querySelector('H3');
-        const dlChild = dt.querySelector('DL');
-        if(h3 && dlChild) {
-          children.push({
-            type: 'folder',
-            title: h3.textContent,
-            children: parseDL(dlChild)
-          });
-        } else {
-          const a = dt.querySelector('A');
-          if(a) {
-            children.push({
-              type: 'bookmark',
-              title: a.textContent,
-              url: a.href
-            });
-          }
-        }
-      }
-      return children;
-    }
-
-    const dlRoot = doc.querySelector('DL');
-    bookmarkTree = {
-      type: 'folder',
-      title: 'Bookmarks',
-      children: dlRoot ? parseDL(dlRoot) : []
-    };
-  }
-
-  // মূল রেন্ডার ফাংশন
-  function renderTree() {
-    const container = document.getElementById('bookmarkContainer');
-    container.innerHTML = '';
-
-    if(!bookmarkTree) {
-      container.textContent = 'Upload a bookmark HTML file to start.';
-      return;
-    }
-
-    // সার্চ ফিল্টার
-    function filterNode(node) {
-      if(searchQuery === '') return node;
-      if(node.type === 'bookmark') {
-        return node.title.toLowerCase().includes(searchQuery) ? node : null;
-      }
-      if(node.type === 'folder') {
-        const filteredChildren = node.children.map(filterNode).filter(c => c !== null);
-        if(filteredChildren.length > 0 || node.title.toLowerCase().includes(searchQuery)) {
-          return {...node, children: filteredChildren};
-        }
-        return null;
-      }
-      return null;
-    }
-
-    const filteredTree = filterNode(bookmarkTree);
-    if(!filteredTree) {
-      container.textContent = 'No bookmarks or folders found.';
-      return;
-    }
-
-    function createList(node) {
-      const ul = document.createElement('ul');
-      node.children.forEach((child, index) => {
-        const li = document.createElement('li');
-        li.dataset.index = index;
-
-        if(child.type === 'folder') {
-          li.className = 'folder';
-
-          const header = document.createElement('div');
-          header.className = 'folder-header';
-
-          // টগল আইকন
-          const toggleBtn = document.createElement('span');
-          toggleBtn.className = 'folder-toggle';
-          toggleBtn.textContent = expandedFolders.has(child) ? '▼' : '►';
-          toggleBtn.title = expandedFolders.has(child) ? 'Collapse folder' : 'Expand folder';
-          toggleBtn.addEventListener('click', e => {
-            e.stopPropagation();
-            if(expandedFolders.has(child)) {
-              expandedFolders.delete(child);
-            } else {
-              expandedFolders.add(child);
-            }
-            renderTree();
-          });
-          header.appendChild(toggleBtn);
-
-          // ফোল্ডার নাম ইনপুট
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.value = child.title;
-          input.title = 'Folder name';
-          input.spellcheck = false;
-          input.autocomplete = 'off';
-
-          input.addEventListener('input', e => {
-            child.title = e.target.value;
-          });
-
-          input.addEventListener('click', e => e.stopPropagation());
-          input.addEventListener('focus', e => {
-            selectedFolderNode = child;
-            highlightSelectedFolder();
-          });
-
-          header.appendChild(input);
-
-          // ডিলিট ফোল্ডার বাটন
-          const delBtn = document.createElement('button');
-          delBtn.textContent = 'Delete Folder';
-          delBtn.style.marginLeft = '8px';
-          delBtn.title = 'Delete this folder and all its contents';
-          delBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if(confirm(`Are you sure you want to delete the folder "${child.title}" and all its contents?`)) {
-              node.children.splice(index, 1);
-              if(selectedFolderNode === child) selectedFolderNode = bookmarkTree;
-              renderTree();
-            }
-          });
-          header.appendChild(delBtn);
-
-          li.appendChild(header);
-
-          // ফোল্ডার এক্সপ্যান্ড থাকলে চাইল্ড দেখাবে
-          if(expandedFolders.has(child)) {
-            li.appendChild(createList(child));
-          }
-
-        } else if(child.type === 'bookmark') {
-          const div = document.createElement('div');
-          div.className = 'bookmark-item';
-
-          // ফেভিকন ইমেজ
-          const faviconImg = document.createElement('img');
-          faviconImg.src = getFaviconUrl(child.url);
-          faviconImg.alt = 'Favicon';
-
-          // রিলোড ফেভিকন বাটন
-          const reloadBtn = document.createElement('button');
-          reloadBtn.title = 'Reload Favicon';
-          reloadBtn.textContent = '🔄';
-          reloadBtn.style.fontSize = '16px';
-          reloadBtn.style.cursor = 'pointer';
-          reloadBtn.style.padding = '0 6px';
-          reloadBtn.style.marginLeft = '6px';
-
-          reloadBtn.addEventListener('click', () => {
-            faviconImg.src = getFaviconUrl(child.url) + `&t=${Date.now()}`;
-          });
-
-          const iconSpan = document.createElement('span');
-          iconSpan.className = 'icon';
-          iconSpan.textContent = '🔗';
-          iconSpan.title = 'Bookmark';
-
-          const titleInput = document.createElement('input');
-          titleInput.type = 'text';
-          titleInput.className = 'bookmark-title';
-          titleInput.value = child.title;
-          titleInput.placeholder = 'Title';
-          titleInput.spellcheck = false;
-          titleInput.autocomplete = 'off';
-
-          titleInput.addEventListener('input', e => {
-            child.title = e.target.value;
-          });
-
-          const urlInput = document.createElement('input');
-          urlInput.type = 'text';
-          urlInput.className = 'bookmark-url';
-          urlInput.value = child.url;
-          urlInput.placeholder = 'URL';
-          urlInput.spellcheck = false;
-          urlInput.autocomplete = 'off';
-
-          urlInput.addEventListener('input', e => {
-            child.url = e.target.value;
-            // URL পরিবর্তনে ফেভিকন আপডেট
-            faviconImg.src = getFaviconUrl(child.url) + `&t=${Date.now()}`;
-          });
-
-          const removeBtn = document.createElement('button');
-          removeBtn.textContent = 'Remove';
-          removeBtn.title = 'Remove Bookmark';
-          removeBtn.addEventListener('click', () => {
-            node.children.splice(index, 1);
-            renderTree();
-          });
-
-          div.appendChild(faviconImg);
-          div.appendChild(iconSpan);
-          div.appendChild(titleInput);
-          div.appendChild(urlInput);
-          div.appendChild(reloadBtn);
-          div.appendChild(removeBtn);
-
-          li.appendChild(div);
-        }
-
-        ul.appendChild(li);
-      });
-
-      Sortable.create(ul, {
-        group: 'nested',
-        animation: 150,
-        fallbackOnBody: true,
-        swapThreshold: 0.65,
-        onEnd: function (evt) {
-          if(!evt.from || !evt.to) return;
-
-          function findNodeFromList(ulElement) {
-            return ulElement._nodeRef;
-          }
-
-          const fromNode = findNodeFromList(evt.from);
-          const toNode = findNodeFromList(evt.to);
-          if(!fromNode || !toNode) return;
-
-          const item = fromNode.children.splice(evt.oldIndex, 1)[0];
-          toNode.children.splice(evt.newIndex, 0, item);
-
-          renderTree();
-        }
-      });
-
-      ul._nodeRef = node;
-      return ul;
-    }
-
-    container.appendChild(createList(filteredTree));
-    highlightSelectedFolder();
-  }
-
-  // সিলেক্টেড ফোল্ডার হাইলাইট
-  function highlightSelectedFolder() {
-    document.querySelectorAll('#bookmarkContainer .folder > .folder-header > input[type=text]').forEach(input => {
-      if(selectedFolderNode && input.value === selectedFolderNode.title) {
-        input.classList.add('selected-folder');
-        input.scrollIntoView({block: 'nearest'});
+function getDomain(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+function getFaviconUrl(url) {
+  const domain = getDomain(url);
+  return domain ? `https://www.google.com/s2/favicons?domain=${domain}` : '';
+}
+function showInputHint(msg, input) {
+  const hint = document.createElement('span');
+  hint.className = 'input-hint';
+  hint.textContent = msg;
+  input.parentNode.appendChild(hint);
+  input.addEventListener('blur', () => hint.remove(), { once: true });
+}
+function parseBookmarkHTML(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const dlRoot = doc.querySelector('DL');
+  function parseDL(dl) {
+    const children = [];
+    [...dl.children].forEach(dt => {
+      const h3 = dt.querySelector('H3');
+      const dlChild = dt.querySelector('DL');
+      if (h3 && dlChild) {
+        children.push({ type: 'folder', title: h3.textContent, children: parseDL(dlChild) });
       } else {
-        input.classList.remove('selected-folder');
+        const a = dt.querySelector('A');
+        if (a) children.push({ type: 'bookmark', title: a.textContent, url: a.href });
       }
     });
+    return children;
+  }
+  bookmarkTree = { type: 'folder', title: 'Bookmarks', children: dlRoot ? parseDL(dlRoot) : [] };
+}
+document.getElementById('fileInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    parseBookmarkHTML(e.target.result);
+    selectedFolderNode = bookmarkTree;
+    expandedFolders.add(bookmarkTree);
+    renderTree();
+    document.getElementById('addFolderBtn').style.display = 'inline-block';
+    document.getElementById('addBookmarkBtn').style.display = 'inline-block';
+    document.getElementById('downloadBtn').style.display = 'inline-block';
+  };
+  reader.readAsText(file);
+});
+function renderTree() {
+  const container = document.getElementById('bookmarkContainer');
+  container.innerHTML = '';
+  if (!bookmarkTree) return container.textContent = 'Upload a bookmark HTML file to start.';
+  folderInputMap = new WeakMap();
+  function createList(node) {
+    const ul = document.createElement('ul');
+    node.children.forEach((child, i) => {
+      const li = document.createElement('li');
+      if (child.type === 'folder') {
+        li.className = 'folder';
+        const header = document.createElement('div');
+        header.className = 'folder-header';
+
+        const toggle = document.createElement('span');
+        toggle.className = 'folder-toggle';
+        toggle.textContent = expandedFolders.has(child) ? '▼' : '►';
+        toggle.addEventListener('click', () => {
+          expandedFolders.has(child) ? expandedFolders.delete(child) : expandedFolders.add(child);
+          renderTree();
+        });
+        header.appendChild(toggle);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = child.title;
+        input.addEventListener('input', e => child.title = e.target.value);
+        input.addEventListener('focus', () => {
+          selectedFolderNode = child;
+          highlightSelectedFolder();
+        });
+        header.appendChild(input);
+        folderInputMap.set(child, input);
+
+        const delBtn = document.createElement('button');
+        delBtn.textContent = 'Delete Folder';
+        delBtn.addEventListener('click', () => {
+          node.children.splice(i, 1);
+          if (selectedFolderNode === child) selectedFolderNode = bookmarkTree;
+          renderTree();
+        });
+        header.appendChild(delBtn);
+        li.appendChild(header);
+        if (expandedFolders.has(child)) li.appendChild(createList(child));
+      } else {
+        const div = document.createElement('div');
+        div.className = 'bookmark-item';
+        const fav = document.createElement('img');
+        fav.src = getFaviconUrl(child.url);
+        const title = document.createElement('input');
+        title.className = 'bookmark-title';
+        title.value = child.title;
+        title.addEventListener('input', e => child.title = e.target.value);
+        const url = document.createElement('input');
+        url.className = 'bookmark-url';
+        url.value = child.url;
+        url.addEventListener('input', e => {
+          child.url = e.target.value;
+          fav.src = getFaviconUrl(child.url) + '&t=' + Date.now();
+        });
+        const reloadBtn = document.createElement('button');
+        reloadBtn.textContent = '🔄';
+        reloadBtn.addEventListener('click', () => {
+          fav.src = getFaviconUrl(child.url) + '&t=' + Date.now();
+        });
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', () => {
+          node.children.splice(i, 1);
+          renderTree();
+        });
+        div.append(fav, title, url, reloadBtn, removeBtn);
+        li.appendChild(div);
+      }
+      ul.appendChild(li);
+    });
+    return ul;
+  }
+  container.appendChild(createList(bookmarkTree));
+  highlightSelectedFolder();
+}
+function highlightSelectedFolder() {
+  document.querySelectorAll('.folder-header input').forEach(input => {
+    input.classList.toggle('selected-folder', selectedFolderNode && input.value === selectedFolderNode.title);
+  });
+}
+function focusLastInputInSelectedFolder(type) {
+  const container = document.getElementById('bookmarkContainer');
+  if (!selectedFolderNode) return;
+  const folders = [...container.querySelectorAll('li.folder')];
+  for (const folder of folders) {
+    const input = folder.querySelector('input[type="text"]');
+    if (input && input.value === selectedFolderNode.title) {
+      const inputs = type === 'folder'
+        ? folder.querySelectorAll('.folder-header input[type="text"]')
+        : folder.querySelectorAll('.bookmark-item input.bookmark-title');
+      if (inputs.length) {
+        const lastInput = inputs[inputs.length - 1];
+        lastInput.focus();
+        showInputHint(`Added ${type} inside: "${selectedFolderNode.title}"`, lastInput);
+      }
+      break;
+    }
+  }
+}
+document.getElementById('addFolderBtn').addEventListener('click', () => {
+  if (!selectedFolderNode) return alert('Select a folder.');
+  selectedFolderNode.children.push({ type: 'folder', title: 'New Folder', children: [] });
+  expandedFolders.add(selectedFolderNode);
+  renderTree();
+  requestAnimationFrame(() => focusLastInputInSelectedFolder('folder'));
+});
+document.getElementById('addBookmarkBtn').addEventListener('click', () => {
+  if (!selectedFolderNode) return alert('Select a folder.');
+  selectedFolderNode.children.push({ type: 'bookmark', title: '', url: '' });
+  expandedFolders.add(selectedFolderNode);
+  renderTree();
+  requestAnimationFrame(() => focusLastInputInSelectedFolder('bookmark'));
+});
+document.getElementById('searchInput').addEventListener('input', e => {
+  searchQuery = e.target.value.trim().toLowerCase();
+  renderTree();
+});
+
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  if (!bookmarkTree) return alert('No bookmarks to export!');
+  const htmlContent = convertToBookmarkHTML(bookmarkTree);
+  const blob = new Blob([htmlContent], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bookmarks.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+function convertToBookmarkHTML(node) {
+  function escapeHTML(str) {
+    return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '\'': '&#39;', '"': '&quot;'
+    }[tag]));
   }
 
-  // নতুন ফোল্ডার অ্যাড
-  document.getElementById('addFolderBtn').addEventListener('click', () => {
-    if(!selectedFolderNode) {
-      alert('Please select a folder to add a new folder.');
-      return;
+  function buildDL(node) {
+    let html = '<DL><p>';
+    for (const child of node.children) {
+      if (child.type === 'folder') {
+        html += `<DT><H3>${escapeHTML(child.title)}</H3>\n`;
+        html += buildDL(child);
+        html += '</DL><p>\n';
+      } else if (child.type === 'bookmark') {
+        const iconUrl = getFaviconUrl(child.url);
+        html += `<DT><A HREF="${escapeHTML(child.url)}" ICON="${iconUrl}">${escapeHTML(child.title)}</A>\n`;
+      }
     }
-    selectedFolderNode.children.push({
-      type: 'folder',
-      title: 'New Folder',
-      children: []
-    });
-    renderTree();
-  });
+    html += '</DL><p>\n';
+    return html;
+  }
 
-  // নতুন বুকমার্ক অ্যাড
-  document.getElementById('addBookmarkBtn').addEventListener('click', () => {
-    if(!selectedFolderNode) {
-      alert('Please select a folder to add a bookmark.');
-      return;
-    }
-    selectedFolderNode.children.push({
-      type: 'bookmark',
-      title: '',
-      url: ''
-    });
-    renderTree();
-  });
-
-  // সার্চ ইনপুট ইভেন্ট
-  document.getElementById('searchInput').addEventListener('input', e => {
-    searchQuery = e.target.value.trim().toLowerCase();
-    renderTree();
-  });
+  return `
+<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<!-- This is an automatically generated file. -->
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks</H1>
+${buildDL(node)}
+`.trim();
+}
 </script>
-
 </body>
 </html>
